@@ -75,7 +75,14 @@ mountroot()
 		ZFS_RPOOL=$(echo "$ZFS_RPOOL" | sed -e 's,/.*,,')
 	fi
 
-	# Use "rpool" as the default, like on most Solaris systems.
+	if [ -z "$ZFS_RPOOL" -a -n "$ZFS_BOOTFS" ]
+	then
+		# We (still) don't have the POOL, but we have a BOOTFS. The pool is
+		# (should be the the first part of the bootfs dataset path)...
+		ZFS_RPOOL=`echo "$ZFS_BOOTFS" | sed 's@/.*@@'`
+	fi
+
+	# Last ditch attempt - use "rpool" as the default, like on most Solaris systems.
 	[ -z "$ZFS_RPOOL" ] && ZFS_RPOOL='rpool'
 
 	if [ -f /etc/zfs/zpool.cache ]; then
