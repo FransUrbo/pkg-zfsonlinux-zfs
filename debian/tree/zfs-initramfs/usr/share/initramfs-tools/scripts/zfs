@@ -147,8 +147,72 @@ mountroot()
 		/bin/sh
 	fi
 
-	if [ -z "$ZFS_BOOTFS" ]
+	if [ -n "$ZFS_BOOTFS" ]
 	then
+		# Booting from a snapshot?
+		if echo "$ZFS_BOOTFS" | grep -q '@'
+		then
+			# Replace the '@' separating dataset and snapshot name with a underscore
+			# NOTE: This might not be the prettiest, but at least we'll know where the
+			#       dataset came from.
+			dset=`echo "$ZFS_BOOTFS" | sed 's/@/_/'`
+
+			# If the destination dataset for the clone already exists, destroy it.
+			zfs get all $dset > /dev/null 2>&1
+                        if [ "$?" -ne 0 ]
+			then
+				[ "$quiet" != "y" ] && log_begin_msg "Destroying clone destination dataset"
+				ZFS_CMD="zfs destroy $dset"
+				ZFS_STDERR=$($ZFS_CMD 2>&1)
+				ZFS_ERROR=$?
+
+				# Destroying the clone target was not successfull -- let the user sort this out
+				if [ "$ZFS_ERROR" -ne 0 ]
+				then
+					disable_plymouth
+					echo "FAIL: $ZFS_CMD"
+					echo "Message: $ZFS_STDERR"
+					echo "Error: $ZFS_ERROR"
+					echo ""
+					echo "Failed to destroy the already existing dataset the clone would create."
+	                                echo "Please make sure that '$dset' is not availible."
+					/bin/sh
+
+					ZFS_ERROR=0
+				else
+					[ "$quiet" != "y" ] && log_end_msg
+				fi
+			fi
+
+			# Clone the snapshot into a dataset we can boot from
+			[ "$quiet" != "y" ] && log_begin_msg "Cloning boot snapshot to dataset"
+			ZFS_CMD="zfs clone $ZFS_BOOTFS $dset"
+			ZFS_STDERR=$($ZFS_CMD 2>&1)
+			ZFS_ERROR=$?
+
+			# Clone was not successfull -- let the user sort this out
+			if [ "$ZFS_ERROR" -ne 0 ]
+			then
+				disable_plymouth
+				echo "FAIL: $ZFS_CMD"
+				echo "Message: $ZFS_STDERR"
+				echo "Error: $ZFS_ERROR"
+				echo ""
+				echo "Failed to clone snapshot."
+                                echo "Make sure that the any problems are corrected and then make sure"
+                                echo "that the dataset '$dset' exists and is bootable."
+				/bin/sh
+
+				ZFS_ERROR=0
+			else
+				[ "$quiet" != "y" ] && log_end_msg
+			fi
+
+			# Success - Use the clone as bootfs.
+			ZFS_BOOTFS="$dset"
+		fi
+	else
+		# Try to find the bootfs automatically (look for the 'bootfs' property in the pool)
 		[ "$quiet" != "y" ] && log_begin_msg "Getting ZFS bootfs property"
 		ZFS_BOOTFS=$(zpool list -H -o bootfs "$ZFS_RPOOL")
 		ZFS_ERROR=$?
@@ -157,13 +221,14 @@ mountroot()
 
 	if [ -z "$ZFS_BOOTFS" ]
 	then
+		# Unable to figure out the bootfs -- let the user sort this out
 		disable_plymouth
 		echo "Command: zpool list -H -o bootfs $ZFS_RPOOL"
 		echo "Error: $ZFS_ERROR, unable to get the bootfs property."
 		echo ""
 		echo "Manually mount the root filesystem on $rootmnt and then exit."
 		echo "Hint: Try:  mount -t zfs -o zfsutil $ZFS_RPOOL/ROOT/system $rootmnt"
-		/bin/sh	
+		/bin/sh
 	fi
 
 	# Force the mountpoint to the only correct value for a root filesystem.
@@ -234,7 +299,7 @@ mountroot()
 		echo "Error: $ZFS_ERROR"
 		echo ""
 		echo "Manually mount the root filesystem on $rootmnt and then exit."
-		/bin/sh	
+		/bin/sh
 	fi
 
 	[ "$quiet" != "y" ] && log_begin_msg "Running /scripts/local-bottom"
